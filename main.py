@@ -31,7 +31,7 @@ CAM_SIZE = (640, 480)  # pick with: python -m tools.camera_bench
 # Calib. Eyes-only steps keep the head on the center, so the fit can tell eye movement from head movement.
 CALIB_STEPS = ((0.5, 0.5, False), (0.1, 0.5, True), (0.9, 0.5, True),
                (0.1, 0.5, False), (0.9, 0.5, False), (0.5, 0.1, False), (0.5, 0.9, False))
-STEADY_DEG = 2.5    # head counts as settled when yaw and pitch each move less than this over 0.3 s
+STEADY_DEG = 4.0    # head counts as settled when yaw and pitch each move less than this over 0.3 s
 
 log = logging.getLogger("main")
 

@@ -124,7 +124,7 @@ DESKTOP_SWITCHDESKTOP = 0x0100
 BELOW_NORMAL_PRIORITY_CLASS = 0x4000
 SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW"}
 BLOCKED_PROCESSES = {"startmenuexperiencehost.exe", "searchhost.exe"}
-QUIET_MS = 800
+QUIET_MS = 800       # a click this recent blocks a switch; mouse input this recent keeps the cursor put
 TYPING_HOLD_S = 3.0  # no switch this long after the last keystroke: typing pins focus to its window
 # keys that count as typing: everything except mouse buttons, modifiers and our own Alt/mask injection
 TYPING_VKS = [vk for vk in range(0x08, 0xFF)
@@ -221,7 +221,7 @@ class Win:
         self.last_pos = {}    # monitor index -> last cursor (x, y) on it
         self.labels = queue.SimpleQueue()  # (monitor, t) of user-initiated foreground changes
         self._dispatched_at = -1e9
-        self.typed_at = -1e9
+        self.typed_at = self.clicked_at = -1e9
         self.placed_at = None  # cursor position we set on the last switch
         self._ldown = False
         # AttachThreadInput needs a message queue on this thread; PeekMessage creates one
@@ -259,6 +259,7 @@ class Win:
         self._ldown = down
         if not clicked:
             return None
+        self.clicked_at = time.monotonic()
         pt = cursor_pos()
         return pt.x, pt.y
 
@@ -291,12 +292,10 @@ class Win:
     # --- guards: polled only when a switch is about to fire ---
 
     def guard_block(self):
-        """None if a switch may fire now, else a short reason it may not."""
-        # Our own SendInput/SetCursorPos also reset the idle clock, but the 1 s refractory
-        # outlasts QUIET_MS, so self-injected input never blocks the next switch.
-        lii = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
-        if GetLastInputInfo(ctypes.byref(lii)) and (GetTickCount() - lii.dwTime) & 0xFFFFFFFF < QUIET_MS:
-            return "input"  # mouse moved or a key was pressed in the last QUIET_MS
+        """None if a switch may fire now, else a short reason it may not. Plain mouse movement does
+        not block (the switch then leaves the cursor alone, see switch_to); clicks and typing do."""
+        if time.monotonic() - self.clicked_at < QUIET_MS / 1000:
+            return "click"
         if time.monotonic() - self.typed_at < TYPING_HOLD_S:
             return "typing"
         if any(GetAsyncKeyState(vk) & 0x8000 for vk in GUARD_KEYS):
@@ -402,9 +401,13 @@ class Win:
             log.info("no activatable window on monitor %d", mon)
             return False
         self._dispatched_at = time.monotonic()
+        # read before _activate: its injected Alt resets the idle clock
+        lii = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
+        mouse_busy = GetLastInputInfo(ctypes.byref(lii)) and (GetTickCount() - lii.dwTime) & 0xFFFFFFFF < QUIET_MS
         if not self._activate(hwnd):
             # expected when the foreground is elevated (UIPI drops our SendInput) or hung
             log.warning("focus switch to %s (%s) failed", _class_name(hwnd), _process_name(hwnd))
             return False
-        self._restore_cursor(mon, hwnd, gaze)
+        if not mouse_busy:  # the user is moving the mouse: leave it in their hand
+            self._restore_cursor(mon, hwnd, gaze)
         return True

@@ -128,7 +128,7 @@ def run(cam, pose):
     learn_file = open(LEARNED, "a", newline="")
     learn_out = csv.writer(learn_file)
     log.info("loaded %d click samples", len(clicks))
-    filt, sm = OneEuro(), StateMachine(cal.margin)
+    filt, sm = OneEuro(), StateMachine(cal.margin, dwell=0.38)  # user found 0.4 a touch slow
     hist = collections.deque(maxlen=30)  # (t, yaw, pitch, eye_x, eye_y): recalibration, gaze, steadiness
     trace = open(TRACE, "a", newline="")
     out = csv.writer(trace)

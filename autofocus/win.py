@@ -125,6 +125,10 @@ BELOW_NORMAL_PRIORITY_CLASS = 0x4000
 SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW"}
 BLOCKED_PROCESSES = {"startmenuexperiencehost.exe", "searchhost.exe"}
 QUIET_MS = 800
+TYPING_HOLD_S = 3.0  # no switch this long after the last keystroke: typing pins focus to its window
+# keys that count as typing: everything except mouse buttons, modifiers and our own Alt/mask injection
+TYPING_VKS = [vk for vk in range(0x08, 0xFF)
+              if vk not in (0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xE8)]
 
 
 def init_process():
@@ -217,6 +221,9 @@ class Win:
         self.last_pos = {}    # monitor index -> last cursor (x, y) on it
         self.labels = queue.SimpleQueue()  # (monitor, t) of user-initiated foreground changes
         self._dispatched_at = -1e9
+        self.typed_at = -1e9
+        self.placed_at = None  # cursor position we set on the last switch
+        self._ldown = False
         # AttachThreadInput needs a message queue on this thread; PeekMessage creates one
         PeekMessageW(ctypes.byref(W.MSG()), None, 0, 0, 0)
         self._ready = threading.Event()
@@ -235,6 +242,25 @@ class Win:
 
     def fg_monitor(self):
         return self.monitor_of(GetForegroundWindow())
+
+    def monitor_at(self, pt):
+        info = _monitor_info(MonitorFromPoint(W.POINT(*pt), MONITOR_DEFAULTTONULL))
+        return self.devices.index(info[0]) if info and info[0] in self.devices else None
+
+    def poll_input(self):
+        """Call every tick (polling, no input hook). Records typing; returns the cursor (x, y) if the
+        left button went down since the last call, else None."""
+        # GetAsyncKeyState bit 0 = pressed since the last call, so keys tapped between ticks still count
+        if any(GetAsyncKeyState(vk) & 0x8001 for vk in TYPING_VKS):
+            self.typed_at = time.monotonic()
+        state = GetAsyncKeyState(0x01)
+        down = bool(state & 0x8000)
+        clicked = (down and not self._ldown) or (state & 1 and not down)
+        self._ldown = down
+        if not clicked:
+            return None
+        pt = cursor_pos()
+        return pt.x, pt.y
 
     # --- foreground tracking (out-of-context WinEvent: no input hook, no timeout removal) ---
 
@@ -269,6 +295,8 @@ class Win:
         # outlasts QUIET_MS, so self-injected input never blocks the next switch.
         lii = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
         if GetLastInputInfo(ctypes.byref(lii)) and (GetTickCount() - lii.dwTime) & 0xFFFFFFFF < QUIET_MS:
+            return False
+        if time.monotonic() - self.typed_at < TYPING_HOLD_S:
             return False
         if any(GetAsyncKeyState(vk) & 0x8000 for vk in GUARD_KEYS):
             return False
@@ -353,6 +381,7 @@ class Win:
             return  # cursor already on the target monitor
         if gaze:
             SetCursorPos(*gaze)
+            self.placed_at = gaze
             return
         rect = self._rect(mon)
         pos = self.last_pos.get(mon)

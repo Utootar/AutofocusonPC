@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from autofocus.decide import Calib, OneEuro, StateMachine, fit_point_map, map_point
+from autofocus.decide import Calib, OneEuro, StateMachine, fit_point_map, map_point, refit_maps
 
 YES = lambda: True
 NO = lambda: False
@@ -58,6 +58,19 @@ def test_eyes_only_samples_stop_a_head_only_turn_from_moving_gaze():
     still = map_point(a, obs(0, 0))[0]
     head_turned_eyes_back = map_point(a, obs(20, -20 * 40 / 30))[0]
     assert head_turned_eyes_back == pytest.approx(still, abs=1)
+
+
+def test_recent_clicks_pull_the_map_after_the_chair_moved():
+    rng = np.random.default_rng(2)
+    before = np.array([[-45.0, 0], [0, -60], [0, 0], [0, 0], [500, 600]])
+    after = before + [[0, 0], [0, 0], [0, 0], [0, 0], [-300, 80]]  # chair moved: everything shifts
+    poses = rng.uniform((-20, -10, -5, -5), (20, 10, 5, 5), (400, 4))
+    now = 10_000.0
+    rows = [(0.0, "cal", 0, *map_point(before, p), *p) for p in poses[:300]]
+    rows += [(now - 60, "click", 0, *map_point(after, p), *p) for p in poses[300:]]
+    _, maps = refit_maps(rows, now, n_monitors=1)
+    probe = (5.0, 2.0, 1.0, 0.0)
+    assert np.linalg.norm(map_point(maps[0], probe) - map_point(after, probe)) < 50
 
 
 def test_one_euro_smooths_jitter_and_resets():

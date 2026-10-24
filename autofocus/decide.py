@@ -66,10 +66,31 @@ def _aug(p):
     return np.concatenate([p, np.ones(p.shape[:-1] + (1,))], -1)
 
 
-def fit_point_map(poses, points):
-    """Least-squares affine map (yaw, pitch) -> screen (x, y) for one monitor. Returns a 3x2 matrix."""
-    a, *_ = np.linalg.lstsq(_aug(poses), np.asarray(points, float), rcond=None)
+def fit_point_map(poses, points, weights=None):
+    """Weighted least-squares affine map pose -> screen (x, y). Returns a (pose dims + 1) x 2 matrix."""
+    x, y = _aug(poses), np.asarray(points, float)
+    if weights is not None:
+        sw = np.sqrt(np.asarray(weights, float))[:, None]
+        x, y = x * sw, y * sw
+    a, *_ = np.linalg.lstsq(x, y, rcond=None)
     return a
+
+
+CAL_WEIGHT = 10.0    # all calibration samples together weigh as much as this many fresh clicks
+CLICK_TAU_S = 1800   # click weight decays by e every 30 min, so recent clicks follow a moved chair
+
+
+def refit_maps(rows, now, n_monitors=2):
+    """rows: (wall_t, kind, monitor, x, y, *pose), kind "cal" or "click".
+    Returns (gaze map over all monitors, [map per monitor])."""
+    t = np.array([r[0] for r in rows], float)
+    cal = np.array([r[1] == "cal" for r in rows])
+    mon = np.array([r[2] for r in rows])
+    xy = np.array([r[3:5] for r in rows], float)
+    pose = np.array([r[5:] for r in rows], float)
+    w = np.where(cal, CAL_WEIGHT / max(cal.sum(), 1), np.exp(-(now - t) / CLICK_TAU_S))
+    return (fit_point_map(pose, xy, w),
+            [fit_point_map(pose[mon == k], xy[mon == k], w[mon == k]) for k in range(n_monitors)])
 
 
 def map_point(a, pose):

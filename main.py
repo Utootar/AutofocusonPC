@@ -14,10 +14,13 @@ import time
 import numpy as np
 
 from autofocus import vision, win
-from autofocus.decide import Calib, OneEuro, StateMachine, fit_point_map, map_point
+from autofocus.decide import Calib, OneEuro, StateMachine, fit_point_map, map_point, refit_maps
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 CALIB = os.path.join(DATA, "calib.json")
+LEARNED = os.path.join(DATA, "learned.csv")  # labeled samples: calibration + clicks while running
+MAX_CLICKS = 300    # most recent click samples kept for refitting
+OUTLIER_PX = 500    # a click this far from the predicted gaze: the user was not looking at the cursor
 TRACE = os.path.join(DATA, "trace.csv")
 MODEL = os.path.join(DATA, "face_landmarker.task")
 TRACE_MAX = 10 * 1024 * 1024
@@ -58,7 +61,7 @@ def calibrate(cam, pose):
     input("Move the mouse onto the notebook screen, then press Enter... ")
     first = win.cursor_device()
     devices = [first] + [d for d in lay if d != first]
-    centers, maps, all_poses, all_pts = [], [], [], []
+    centers, maps, all_poses, all_pts, rows = [], [], [], [], []
     for name, dev in zip(("notebook", "external"), devices):
         l, t, r, b = lay[dev]
         poses, pts = [], []
@@ -77,6 +80,7 @@ def calibrate(cam, pose):
                 centers.append(s)
             poses += s
             pts += [(x, y)] * len(s)
+            rows += [(time.time(), "cal", len(maps), x, y, *p) for p in s]
         a = fit_point_map(poses, pts)
         print(f"{name}: gaze fit error ~{fit_error(a, poses, pts):.0f} px")
         maps.append(a.tolist())
@@ -90,6 +94,8 @@ def calibrate(cam, pose):
     with open(CALIB, "w") as f:
         json.dump({**cal.to_dict(), "devices": devices, "layout": win.layout(),
                    "gaze_map": gaze.tolist(), "point_maps": maps}, f, indent=2)
+    with open(LEARNED, "w", newline="") as f:  # a new calibration also forgets old clicks
+        csv.writer(f).writerows(rows)
     print(f"noise {cal.sigma_s:.3f}, margin {cal.margin:.2f}")
     if not cal.feasible:
         print("WARNING: the two monitors are too close to tell apart. Calibrate again, "
@@ -106,12 +112,21 @@ def run(cam, pose):
         sys.exit("No calib.json. Run: python main.py calibrate")
     with open(CALIB) as f:
         cfg = json.load(f)
-    if "gaze_map" not in cfg:
+    if "gaze_map" not in cfg or not os.path.exists(LEARNED):
         sys.exit("calib.json is from an older version. Run: python main.py calibrate")
     cal = Calib.from_dict(cfg)  # passive updates stay in memory; calib.json is the stable baseline
     w = win.Win(cfg["devices"])
-    # shortcut: maps are fixed at calibration (passive recalibration only moves Calib); recalibrate after moving the chair
-    gmap, maps = cfg["gaze_map"], cfg["point_maps"]
+    with open(LEARNED, newline="") as f:
+        learned = [(float(r[0]), r[1], int(r[2]), *map(float, r[3:])) for r in csv.reader(f)]
+    cal_rows = [r for r in learned if r[1] == "cal"]
+    clicks = collections.deque((r for r in learned if r[1] == "click"), maxlen=MAX_CLICKS)
+    gmap, maps = refit_maps(cal_rows + list(clicks), time.time())
+    with open(LEARNED + ".tmp", "w", newline="") as f:  # drop clicks beyond MAX_CLICKS; replace is atomic
+        csv.writer(f).writerows(cal_rows + list(clicks))
+    os.replace(LEARNED + ".tmp", LEARNED)
+    learn_file = open(LEARNED, "a", newline="")
+    learn_out = csv.writer(learn_file)
+    log.info("loaded %d click samples", len(clicks))
     filt, sm = OneEuro(), StateMachine(cal.margin)
     hist = collections.deque(maxlen=30)  # (t, yaw, pitch, eye_x, eye_y): recalibration, gaze, steadiness
     trace = open(TRACE, "a", newline="")
@@ -163,6 +178,19 @@ def run(cam, pose):
                 s = filt(t, cal.score(map_point(gmap, p)))
 
             w.track_cursor()
+            click = w.poll_input()
+            # learn from clicks: people look at the cursor when they click. Skip clicks on the spot we
+            # put the cursor ourselves, or the map would learn its own guesses.
+            if click and click != w.placed_at and p is not None and steady(hist, t):
+                mon = w.monitor_at(click)
+                recent = [h[1:] for h in hist if h[0] >= t - 0.3]
+                pm = np.mean(recent, axis=0)
+                if mon is not None and np.hypot(*(map_point(maps[mon], pm) - click)) < OUTLIER_PX:
+                    row = (time.time(), "click", mon, *click, *pm)
+                    clicks.append(row)
+                    learn_out.writerow([row[0], row[1], row[2], *row[3:5], *(f"{v:.2f}" for v in pm)])
+                    learn_file.flush()
+                    gmap, maps = refit_maps(cal_rows + list(clicks), time.time())
             fg = w.fg_monitor()
             target = sm.step(t, s, fg, lambda: steady(hist, t) and w.guards_ok())
             event = ""
@@ -192,6 +220,7 @@ def run(cam, pose):
     finally:
         cam.close()
         trace.close()
+        learn_file.close()
         w.close()
 
 

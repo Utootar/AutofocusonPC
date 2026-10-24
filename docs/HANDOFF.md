@@ -29,7 +29,7 @@ Setup ของผู้ใช้:
   - `SHQueryUserNotificationState` (fullscreen / presentation)
   - blocklist Start/Search
 - วิธีย้าย focus: กด Alt ผ่าน `SendInput`, เรียก `SetForegroundWindow`, ส่ง VK `0xE8` เพื่อ mask Alt-up ถ้าไม่สำเร็จ fallback เป็น `AttachThreadInput` ถ้ายังไม่สำเร็จให้ log แล้วจบ ไม่วน retry
-- ตอน switch (อัปเดต 2026-10-24): เลือกหน้าต่างใต้จุดที่หันหัวไปมอง และวางเมาส์ตรงนั้น จุดนี้ได้จาก affine map `(yaw, pitch, eye_x, eye_y) → (x, y)` ของแต่ละจอ (eye_x/eye_y คือตำแหน่ง iris เทียบกับหัวตา-หางตา) ซึ่ง fit ตอน calibrate 7 จุดต่อจอ (`CALIB_STEPS`: กลาง, ซ้าย/ขวาแบบขยับแค่ตา, ซ้าย ขวา บน ล่างแบบมองปกติ) ขั้นตอนขยับแค่ตาใช้แยกค่าตาออกจากค่าหัว เพราะค่า iris ใน image space ปนกับ yaw (corr 0.81 ใน trace) การเลือกจอ (อัปเดตหลังผู้ใช้แจ้งว่าหันแค่หัวก็ switch) ใช้ `gaze_map` ซึ่งเป็น affine map เดียวที่ fit จากทั้งสองจอ แปลงเป็นจุดบนเดสก์ท็อปก่อน แล้วค่อยส่งให้ `Calib` project ระหว่างจุดกลางของสองจอ และจะ switch ก็ต่อเมื่อหัวหยุดนิ่งแล้ว (`steady()`: ขยับน้อยกว่า 2.5° ใน 0.3 วินาที) เพื่อไม่ให้วัดจุดมองตอนหัวกำลังหัน ถ้าใต้จุดนั้นไม่มีหน้าต่างที่ activate ได้ จะ fallback ไปใช้ MRU ถ้า `calib.json` เก่าไม่มี `point_maps` จะใช้วิธีเดิม คือ MRU + คืนเมาส์ไปตำแหน่งล่าสุด
+- ตอน switch (อัปเดต 2026-10-24): เลือกหน้าต่างใต้จุดที่หันหัวไปมอง และวางเมาส์ตรงนั้น จุดนี้ได้จาก affine map `(yaw, pitch, eye_x, eye_y) → (x, y)` ของแต่ละจอ (eye_x/eye_y คือตำแหน่ง iris เทียบกับหัวตา-หางตา) ซึ่ง fit ตอน calibrate 15 จุดต่อจอ (`CALIB_STEPS`: กลาง, ซ้าย/ขวาแบบขยับแค่ตา, แล้วตาราง 4x3 รวมมุมแบบมองปกติ; เดิมมีแค่ซ้าย ขวา บน ล่าง ซึ่งวัดจาก `tools/l2cs_test.py` แล้วพลาด 240 px เทียบกับตาราง 196 px) ขั้นตอนขยับแค่ตาใช้แยกค่าตาออกจากค่าหัว เพราะค่า iris ใน image space ปนกับ yaw (corr 0.81 ใน trace) การเลือกจอ (อัปเดตหลังผู้ใช้แจ้งว่าหันแค่หัวก็ switch) ใช้ `gaze_map` ซึ่งเป็น affine map เดียวที่ fit จากทั้งสองจอ แปลงเป็นจุดบนเดสก์ท็อปก่อน แล้วค่อยส่งให้ `Calib` project ระหว่างจุดกลางของสองจอ และจะ switch ก็ต่อเมื่อหัวหยุดนิ่งแล้ว (`steady()`: ขยับน้อยกว่า 2.5° ใน 0.3 วินาที) เพื่อไม่ให้วัดจุดมองตอนหัวกำลังหัน ถ้าใต้จุดนั้นไม่มีหน้าต่างที่ activate ได้ จะ fallback ไปใช้ MRU ถ้า `calib.json` เก่าไม่มี `point_maps` จะใช้วิธีเดิม คือ MRU + คืนเมาส์ไปตำแหน่งล่าสุด
 - ถ้าเมาส์อยู่บนจอปลายทางอยู่แล้ว จะไม่ย้ายเมาส์
 - เป็น exe ธรรมดา ไม่ทำ uiAccess ยอมรับว่า switch ไปหน้าต่าง admin/elevated อาจล้มเหลว
 - passive recalibration: เมื่อผู้ใช้เปลี่ยน foreground เอง ระบบจะปรับ centroid ช้าๆ การปรับนี้เก็บใน memory เท่านั้น ไม่เขียนกลับ `calib.json`
@@ -84,7 +84,7 @@ Setup ของผู้ใช้:
 - repo: https://github.com/Utootar/AutofocusonPC
 
 ## ขั้นต่อไป
-1. รัน `.venv\Scripts\python.exe main.py calibrate` ใหม่ (แบบ 7 จุดต่อจอ) แล้วดูค่า `gaze fit error` ที่พิมพ์ออกมา ยังไม่ได้ทดสอบกับกล้องจริง: gaze-based monitor choice, การเรียนรู้จากคลิก และ typing guard
+1. รัน `.venv\Scripts\python.exe main.py calibrate` ใหม่ (แบบ 15 จุดต่อจอ) แล้วดูค่า `gaze fit error` ที่พิมพ์ออกมา ยังไม่ได้ทดสอบกับกล้องจริง: gaze-based monitor choice, การเรียนรู้จากคลิก และ typing guard
 2. รัน `.venv\Scripts\python.exe main.py` แล้วทดสอบตาม checklist ในหัวข้อ Verification ของแผน `C:\Users\optim\.claude\plans\snoopy-whistling-graham.md`
 3. ถ้า switch ไว/ช้าเกินไป หรือ switch ผิด ให้ tune ด้วย `python -m tools.replay data\trace.csv --dwell ... --beta ...` แล้วนำค่าที่ได้ไปแก้ใน `StateMachine`/`OneEuro` ใน `main.py`
 4. เช็ค CPU ของ `svchost (FrameServer)` ใน Task Manager

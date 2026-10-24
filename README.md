@@ -32,7 +32,7 @@ python -m venv .venv
 
 ห้ามติดตั้ง `opencv-python` เพิ่ม เพราะ mediapipe ใช้ `opencv-contrib-python` อยู่แล้ว ถ้ามีทั้งสองตัว `cv2` จะชนกัน
 
-ไฟล์ model `face_landmarker.task` จะดาวน์โหลดอัตโนมัติตอนรันครั้งแรก
+ไฟล์ model `face_landmarker.task` จะดาวน์โหลดอัตโนมัติลง `data/` ตอนรันครั้งแรก
 
 ## ใช้งาน
 
@@ -46,7 +46,7 @@ python -m venv .venv
 2. โปรแกรมจะย้ายเมาส์ไปให้ 5 จุดต่อจอ (กลาง ซ้าย ขวา บน ล่าง)
 3. ทุกจุด ให้มองเมาส์ตามปกติ แล้วกด Enter จากนั้นมองค้างไว้ประมาณ 2 วินาที
 
-เมื่อเสร็จ โปรแกรมจะเขียน `calib.json` และพิมพ์ `gaze fit error` ของแต่ละจอ ค่ายิ่งต่ำยิ่งแม่น
+เมื่อเสร็จ โปรแกรมจะเขียน `data/calib.json` และพิมพ์ `gaze fit error` ของแต่ละจอ ค่ายิ่งต่ำยิ่งแม่น
 
 ต้อง calibrate ใหม่เมื่อ:
 - ย้ายเก้าอี้หรือเปลี่ยนท่านั่ง
@@ -61,14 +61,14 @@ python -m venv .venv
 
 กด Ctrl+C เพื่อหยุด
 
-ระหว่างรัน โปรแกรมจะบันทึก `trace.csv` เพื่อใช้ debug หรือ tune ค่า
+ระหว่างรัน โปรแกรมจะบันทึก `data/trace.csv` เพื่อใช้ debug หรือ tune ค่า
 
 ## Tune
 
-ใช้ `replay.py` เล่น `trace.csv` แบบ offline เพื่อลองค่า dwell และ filter:
+ใช้ `tools/replay.py` เล่น `data/trace.csv` แบบ offline เพื่อลองค่า dwell และ filter (รันจากโฟลเดอร์โปรเจกต์):
 
 ```
-.venv\Scripts\python.exe replay.py trace.csv --dwell 0.4 --beta 0.5
+.venv\Scripts\python.exe -m tools.replay data\trace.csv --dwell 0.4 --beta 0.5
 ```
 
 ได้ค่าที่ต้องการแล้ว ให้แก้ค่าใน `StateMachine` และ `OneEuro` ใน `main.py`
@@ -84,11 +84,13 @@ python -m venv .venv
 | ไฟล์ | หน้าที่ |
 |---|---|
 | `main.py` | จุดเริ่มโปรแกรม: calibrate และ loop หลัก |
-| `decide.py` | logic ล้วน: `Calib`, gaze point map, `OneEuro`, `StateMachine` |
-| `vision.py` | กล้อง และการประมาณทิศหัวกับตำแหน่งตา |
-| `win.py` | Win32 ผ่าน ctypes: จอ, หน้าต่าง, guards, ย้าย focus, เมาส์ |
-| `replay.py` | replay `trace.csv` แบบ offline |
-| `test_decide.py` | unit tests |
+| `autofocus/decide.py` | logic ล้วน: `Calib`, gaze point map, `OneEuro`, `StateMachine` |
+| `autofocus/vision.py` | กล้อง และการประมาณทิศหัวกับตำแหน่งตา |
+| `autofocus/win.py` | Win32 ผ่าน ctypes: จอ, หน้าต่าง, guards, ย้าย focus, เมาส์ |
+| `tools/replay.py` | replay `trace.csv` แบบ offline |
+| `tests/test_decide.py` | unit tests |
+| `docs/HANDOFF.md` | บันทึกสถานะงานและการตัดสินใจ |
+| `data/` | ไฟล์เฉพาะเครื่อง: `calib.json`, `trace.csv`, model (ไม่อยู่ใน git) |
 
 ## ข้อจำกัด
 

@@ -2,6 +2,8 @@
 __pycache__/
 .pytest_cache/
 # per-user data: calibration, head-pose trace, auto-downloaded model
+data/
+# same files left in the root by versions before data/
 calib.json
 trace.csv*
 face_landmarker.task*

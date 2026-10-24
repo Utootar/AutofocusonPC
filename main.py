@@ -13,14 +13,13 @@ import time
 
 import numpy as np
 
-import vision
-import win
-from decide import Calib, OneEuro, StateMachine, fit_point_map, map_point
+from autofocus import vision, win
+from autofocus.decide import Calib, OneEuro, StateMachine, fit_point_map, map_point
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-CALIB = os.path.join(HERE, "calib.json")
-TRACE = os.path.join(HERE, "trace.csv")
-MODEL = os.path.join(HERE, "face_landmarker.task")
+DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+CALIB = os.path.join(DATA, "calib.json")
+TRACE = os.path.join(DATA, "trace.csv")
+MODEL = os.path.join(DATA, "face_landmarker.task")
 TRACE_MAX = 10 * 1024 * 1024
 OPEN_RETRY_S = 30   # camera busy (e.g. a video call): back off
 STALL_S = 3         # no frames this long (e.g. after resume): reopen
@@ -187,6 +186,7 @@ def run(cam, pose):
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     win.init_process()
+    os.makedirs(DATA, exist_ok=True)
     cam, pose = vision.Camera(), vision.HeadPose(vision.ensure_model(MODEL))
     try:
         calibrate(cam, pose) if sys.argv[1:] == ["calibrate"] else run(cam, pose)

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from decide import Calib, OneEuro, StateMachine, fit_point_map, map_point
+from autofocus.decide import Calib, OneEuro, StateMachine, fit_point_map, map_point
 
 YES = lambda: True
 NO = lambda: False

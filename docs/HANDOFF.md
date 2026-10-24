@@ -35,16 +35,16 @@ Setup ของผู้ใช้:
 - passive recalibration: เมื่อผู้ใช้เปลี่ยน foreground เอง ระบบจะปรับ centroid ช้าๆ การปรับนี้เก็บใน memory เท่านั้น ไม่เขียนกลับ `calib.json`
 
 ## ไฟล์
-- `decide.py`: logic ล้วน ได้แก่ `Calib`, `OneEuro`, `StateMachine`
-- `vision.py`: กล้อง MSMF 640x480 (grab ทุกเฟรม แต่ decode เฉพาะตอนขอ) + `HeadPose`
-- `win.py`: Win32 ผ่าน ctypes ได้แก่ monitors, MRU ต่อจอ (WinEvent out-of-context), guards, activate, cursor restore, lock detection
+- `autofocus/decide.py`: logic ล้วน ได้แก่ `Calib`, `fit_point_map`/`map_point`, `OneEuro`, `StateMachine`
+- `autofocus/vision.py`: กล้อง MSMF 640x480 (grab ทุกเฟรม แต่ decode เฉพาะตอนขอ) + `HeadPose` (ทิศหัว + iris)
+- `autofocus/win.py`: Win32 ผ่าน ctypes ได้แก่ monitors, MRU ต่อจอ (WinEvent out-of-context), guards, activate, หน้าต่างใต้จุดมอง, cursor, lock detection
 - `main.py`:
-  - `python main.py calibrate` เขียน `calib.json`
-  - `python main.py` รันจริงและเขียน `trace.csv`
-- `replay.py`: replay `trace.csv` แบบ offline เพื่อ tune ค่าต่างๆ
-- `test_decide.py`: pytest 12 ตัว
+  - `python main.py calibrate` เขียน `data/calib.json`
+  - `python main.py` รันจริงและเขียน `data/trace.csv`
+- `tools/replay.py`: replay `trace.csv` แบบ offline เพื่อ tune ค่าต่างๆ รันด้วย `python -m tools.replay data\trace.csv` จาก root
+- `tests/test_decide.py`: pytest 12 ตัว (`pytest.ini` ตั้ง `pythonpath = .`)
 - `requirements.txt` และ `.venv`: ห้ามติดตั้ง `opencv-python` เพราะ mediapipe ใช้ `opencv-contrib-python` อยู่แล้ว ถ้ามีทั้งคู่ `cv2` จะชนกัน
-- `face_landmarker.task`: model โหลดอัตโนมัติตอนรันครั้งแรก
+- `data/`: `calib.json`, `trace.csv`, `face_landmarker.task` (model โหลดอัตโนมัติตอนรันครั้งแรก) ทั้งโฟลเดอร์อยู่ใน `.gitignore`
 
 ## สถานะ
 เสร็จและทดสอบแล้ว:
@@ -76,7 +76,7 @@ Setup ของผู้ใช้:
 ## ขั้นต่อไป
 1. รัน `.venv\Scripts\python.exe main.py calibrate` ใหม่ (แบบ 5 จุดต่อจอ) แล้วดูค่า `gaze fit error` ที่พิมพ์ออกมา ตอนมองต้องหันหัวด้วย ไม่ใช่เหลือบแค่ตา
 2. รัน `.venv\Scripts\python.exe main.py` แล้วทดสอบตาม checklist ในหัวข้อ Verification ของแผน `C:\Users\optim\.claude\plans\snoopy-whistling-graham.md`
-3. ถ้า switch ไว/ช้าเกินไป หรือ switch ผิด ให้ tune ด้วย `replay.py trace.csv --dwell ... --beta ...` แล้วนำค่าที่ได้ไปแก้ใน `StateMachine`/`OneEuro` ใน `main.py`
+3. ถ้า switch ไว/ช้าเกินไป หรือ switch ผิด ให้ tune ด้วย `python -m tools.replay data\trace.csv --dwell ... --beta ...` แล้วนำค่าที่ได้ไปแก้ใน `StateMachine`/`OneEuro` ใน `main.py`
 4. เช็ค CPU ของ `svchost (FrameServer)` ใน Task Manager
 
 ## ความเสี่ยงที่รู้อยู่แล้ว

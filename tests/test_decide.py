@@ -47,6 +47,19 @@ def test_point_map_recovers_affine_pose_to_screen():
     assert map_point(a, (37.0, 2.0)) == pytest.approx(map_point(true, (37.0, 2.0)))
 
 
+def test_eyes_only_samples_stop_a_head_only_turn_from_moving_gaze():
+    # gaze_x = 40*yaw + 30*eye; the measured eye offset also picks up 0.6*yaw from head rotation
+    def obs(yaw, eye):
+        return (yaw, 0.0, 0.6 * yaw + eye, 0.0)
+    natural = [(yaw, 0.2 * yaw) for yaw in np.linspace(-5, 45, 20)]  # eyes lead the head a little
+    eyes_only = [(yaw, eye) for yaw in (0, 40) for eye in (-10, 10)]
+    poses = [obs(y, e) for y, e in natural + eyes_only]
+    a = fit_point_map(poses, [(40 * y + 30 * e, 0.0) for y, e in natural + eyes_only])
+    still = map_point(a, obs(0, 0))[0]
+    head_turned_eyes_back = map_point(a, obs(20, -20 * 40 / 30))[0]
+    assert head_turned_eyes_back == pytest.approx(still, abs=1)
+
+
 def test_one_euro_smooths_jitter_and_resets():
     f = OneEuro()
     out = [f(i * 0.1, 0.5 + (0.05 if i % 2 else -0.05)) for i in range(30)]

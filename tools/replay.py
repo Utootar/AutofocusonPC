@@ -9,7 +9,7 @@ import argparse
 import csv
 import json
 
-from autofocus.decide import Calib, OneEuro, StateMachine
+from autofocus.decide import Calib, OneEuro, StateMachine, map_point
 
 
 def main():
@@ -24,17 +24,19 @@ def main():
     a = ap.parse_args()
 
     with open(a.calib) as f:
-        cal = Calib.from_dict(json.load(f))
+        cfg = json.load(f)
+    cal = Calib.from_dict(cfg)
     filt = OneEuro(a.min_cutoff, a.beta)
     sm = StateMachine(a.margin if a.margin is not None else cal.margin, a.dwell, a.refractory)
     fg, switches = None, []
     with open(a.trace, newline="") as f:
         for row in csv.reader(f):
-            t, yaw, pitch, fg_logged = float(row[0]), row[1], row[2], row[5]
+            t, fg_logged = float(row[0]), row[5]
+            pose = row[1:3] + row[7:9]  # yaw, pitch, eye_x, eye_y; rows before eye tracking have no eyes
             if fg is None and fg_logged:
                 fg = int(fg_logged)
-            if yaw:
-                s = filt(t, cal.score((float(yaw), float(pitch))))
+            if len(pose) == 4 and all(pose):
+                s = filt(t, cal.score(map_point(cfg["gaze_map"], [float(v) for v in pose])))
             else:
                 filt.reset()
                 s = None

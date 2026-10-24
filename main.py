@@ -1,6 +1,6 @@
 """Head-pose monitor focus switcher.
 
-  python main.py calibrate   look at the mouse pointer at 5 spots per monitor; writes calib.json
+  python main.py calibrate   look at the mouse pointer at 7 spots per monitor; writes data/calib.json
   python main.py             run; Ctrl+C to stop
 """
 import collections
@@ -23,8 +23,10 @@ MODEL = os.path.join(DATA, "face_landmarker.task")
 TRACE_MAX = 10 * 1024 * 1024
 OPEN_RETRY_S = 30   # camera busy (e.g. a video call): back off
 STALL_S = 3         # no frames this long (e.g. after resume): reopen
-# fractions of each monitor's width/height to look at during calibration; center first, it fits Calib
-GAZE_POINTS = ((0.5, 0.5), (0.1, 0.5), (0.9, 0.5), (0.5, 0.1), (0.5, 0.9))
+# calibration steps per monitor: (x, y as fractions of the monitor, eyes only). Center first: it fits
+# Calib. Eyes-only steps keep the head on the center, so the fit can tell eye movement from head movement.
+CALIB_STEPS = ((0.5, 0.5, False), (0.1, 0.5, True), (0.9, 0.5, True),
+               (0.1, 0.5, False), (0.9, 0.5, False), (0.5, 0.1, False), (0.5, 0.9, False))
 STEADY_DEG = 2.5    # head counts as settled when yaw and pitch each move less than this over 0.3 s
 
 log = logging.getLogger("main")
@@ -56,36 +58,47 @@ def calibrate(cam, pose):
     input("Move the mouse onto the notebook screen, then press Enter... ")
     first = win.cursor_device()
     devices = [first] + [d for d in lay if d != first]
-    centers, maps = [], []
+    centers, maps, all_poses, all_pts = [], [], [], []
     for name, dev in zip(("notebook", "external"), devices):
         l, t, r, b = lay[dev]
         poses, pts = [], []
-        for fx, fy in GAZE_POINTS:
+        for i, (fx, fy, eyes_only) in enumerate(CALIB_STEPS):
             x, y = int(l + fx * (r - l)), int(t + fy * (b - t))
             win.SetCursorPos(x, y)
-            input(f"[{name}] Look at the mouse pointer the way you normally would, keep looking, press Enter... ")
+            how = (f"keep your HEAD facing the center of the {name} screen, move ONLY your EYES to the mouse pointer"
+                   if eyes_only else "look at the mouse pointer the way you normally would")
+            input(f"[{name} {i + 1}/{len(CALIB_STEPS)}] {how}, keep looking, press Enter... ")
             time.sleep(0.3)  # let the head settle after the key press
             print("Hold still for 1.5 s")
             s = sample(cam, pose, 1.5)
             if len(s) < 8:
                 sys.exit(f"Only {len(s)} face samples. Check lighting and that the camera sees you.")
-            if (fx, fy) == GAZE_POINTS[0]:
-                centers.append([p[:2] for p in s])  # monitor choice uses head pose only
+            if i == 0:
+                centers.append(s)
             poses += s
             pts += [(x, y)] * len(s)
         a = fit_point_map(poses, pts)
-        err = np.sqrt(np.mean(np.sum((map_point(a, poses) - pts) ** 2, axis=1)))
-        print(f"{name}: gaze fit error ~{err:.0f} px")
+        print(f"{name}: gaze fit error ~{fit_error(a, poses, pts):.0f} px")
         maps.append(a.tolist())
+        all_poses += poses
+        all_pts += pts
     cam.close()
-    cal = Calib.fit(*centers)
+    # one map over both monitors chooses the monitor, so eyes count: turning only the head does not switch
+    gaze = fit_point_map(all_poses, all_pts)
+    print(f"both screens: gaze fit error ~{fit_error(gaze, all_poses, all_pts):.0f} px")
+    cal = Calib.fit(*[map_point(gaze, c) for c in centers])
     with open(CALIB, "w") as f:
-        json.dump({**cal.to_dict(), "devices": devices, "layout": win.layout(), "point_maps": maps}, f, indent=2)
-    print(f"centroids {np.round(cal.c[0], 1)} vs {np.round(cal.c[1], 1)}, "
-          f"noise {cal.sigma_s:.3f}, margin {cal.margin:.2f}")
+        json.dump({**cal.to_dict(), "devices": devices, "layout": win.layout(),
+                   "gaze_map": gaze.tolist(), "point_maps": maps}, f, indent=2)
+    print(f"noise {cal.sigma_s:.3f}, margin {cal.margin:.2f}")
     if not cal.feasible:
-        print("WARNING: the two monitors are too close to tell apart by head pose. "
-              "Turn your head (not just your eyes) toward each screen and calibrate again.")
+        print("WARNING: the two monitors are too close to tell apart. Calibrate again, "
+              "and look straight at each pointer.")
+
+
+def fit_error(a, poses, pts):
+    """RMS distance in px between the map's prediction and the pointer the user looked at."""
+    return np.sqrt(np.mean(np.sum((map_point(a, poses) - pts) ** 2, axis=1)))
 
 
 def run(cam, pose):
@@ -93,13 +106,12 @@ def run(cam, pose):
         sys.exit("No calib.json. Run: python main.py calibrate")
     with open(CALIB) as f:
         cfg = json.load(f)
+    if "gaze_map" not in cfg:
+        sys.exit("calib.json is from an older version. Run: python main.py calibrate")
     cal = Calib.from_dict(cfg)  # passive updates stay in memory; calib.json is the stable baseline
     w = win.Win(cfg["devices"])
     # shortcut: maps are fixed at calibration (passive recalibration only moves Calib); recalibrate after moving the chair
-    maps = cfg.get("point_maps")  # absent in an old calib.json: MRU window + last cursor position
-    if maps and len(maps[0]) != 5:  # 3x2 head-only map: input no longer matches the 4-value pose
-        log.warning("calib.json predates eye tracking; run calibrate again for gaze placement")
-        maps = None
+    gmap, maps = cfg["gaze_map"], cfg["point_maps"]
     filt, sm = OneEuro(), StateMachine(cal.margin)
     hist = collections.deque(maxlen=30)  # (t, yaw, pitch, eye_x, eye_y): recalibration, gaze, steadiness
     trace = open(TRACE, "a", newline="")
@@ -148,7 +160,7 @@ def run(cam, pose):
                 s = None
             else:
                 hist.append((t, *p))
-                s = filt(t, cal.score(p[:2]))
+                s = filt(t, cal.score(map_point(gmap, p)))
 
             w.track_cursor()
             fg = w.fg_monitor()
@@ -156,16 +168,16 @@ def run(cam, pose):
             event = ""
             if target is not None:
                 recent = [h[1:] for h in hist if h[0] >= t - 0.3]
-                gaze = map_point(maps[target], np.mean(recent, axis=0)) if maps and recent else None
+                gaze = map_point(maps[target], np.mean(recent, axis=0)) if recent else None
                 ok = w.switch_to(target, gaze)
                 event = f"switch{target}" if ok else f"fail{target}"
                 log.info(event)
 
             while not w.labels.empty():
                 mon, tl = w.labels.get()
-                pts = [h[1:3] for h in hist if tl - 0.3 <= h[0] <= tl]
+                pts = [h[1:] for h in hist if tl - 0.3 <= h[0] <= tl]
                 if pts:
-                    cal.update(mon, np.mean(pts, axis=0))
+                    cal.update(mon, map_point(gmap, np.mean(pts, axis=0)))
 
             # eye columns go last so replay.py's column indices stay valid
             out.writerow([f"{t:.3f}", *([f"{v:.2f}" for v in p[:2]] if p else ["", ""]),

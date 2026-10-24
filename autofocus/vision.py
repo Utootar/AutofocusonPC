@@ -14,7 +14,7 @@ from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions,
 IRIS = ((468, 33, 133), (473, 362, 263))  # face mesh: (iris center, eye corner, eye corner) per eye
 HEAD_X, HEAD_Y = (33, 263), (10, 152)      # head axes: outer eye corner to outer eye corner, forehead to chin
 HEAD_IDS = {i for e in IRIS for i in e} | set(HEAD_X) | set(HEAD_Y)
-FEATURES = 2  # bump when estimate() output changes meaning; calib.json must match
+FEATURES = 3  # bump when estimate() output changes meaning; calib.json must match
 
 
 def _unit(v):
@@ -106,11 +106,12 @@ class HeadPose:
         )
         self._lm = FaceLandmarker.create_from_options(opts)
         self._last_ms = -1
+        self.box = None  # face bounding box (x0, y0, x1, y1) in px from the last estimate(), for tools
 
     def estimate(self, t, frame_bgr):
         """Returns (yaw, pitch, eye_x, eye_y), or None if no face. yaw/pitch are head angles in
         degrees; eye_x/eye_y are the iris offsets from the eye-corner midpoint along the head's own
-        left-right / up-down axes, in percent of eye width, averaged over both eyes. Measuring in the
+        left-right / up-down axes, in percent of eye width, averaged over both eyes weighted toward the one facing the camera. Measuring in the
         head frame (not the image) keeps a head turn from leaking into the eye offset: the iris sits
         in front of the corners, so in the image it shifts with yaw even when the eyes do not move.
         Signs are arbitrary; calibration absorbs them."""
@@ -125,17 +126,24 @@ class HeadPose:
         if f[2] < 0:
             f = -f  # keep atan2 away from its +-180 wrap at a frontal pose
         lm, (h, w) = res.face_landmarks[0], frame_bgr.shape[:2]
+        xs, ys = [p.x * w for p in lm], [p.y * h for p in lm]
+        self.box = (min(xs), min(ys), max(xs), max(ys))
         # landmark z shares x's scale (fraction of image width), so x*w, y*h, z*w is one 3D pixel frame
         pt = {i: np.array([lm[i].x * w, lm[i].y * h, lm[i].z * w]) for i in HEAD_IDS}
         ux = _unit(pt[HEAD_X[1]] - pt[HEAD_X[0]])
         uy = pt[HEAD_Y[1]] - pt[HEAD_Y[0]]
         uy = _unit(uy - (uy @ ux) * ux)
-        ex = ey = 0.0
+        ex = ey = total = 0.0
         for c, a, b in IRIS:
             v = pt[c] - (pt[a] + pt[b]) / 2
             width = np.linalg.norm(pt[b] - pt[a]) or 1.0
-            ex += 50 * (v @ ux) / width  # 50 = 100% / 2 eyes
-            ey += 50 * (v @ uy) / width
+            # trust the eye facing the camera: with the head turned, the far eye is foreshortened and
+            # partly hidden by the nose, and its iris jittered ~5x more while looking at the far monitor
+            wt = (np.linalg.norm((pt[b] - pt[a])[:2]) / width) ** 4
+            ex += wt * 100 * (v @ ux) / width
+            ey += wt * 100 * (v @ uy) / width
+            total += wt
+        ex, ey = ex / (total or 1.0), ey / (total or 1.0)
         return (math.degrees(math.atan2(f[0], f[2])),
                 math.degrees(math.atan2(f[1], math.hypot(f[0], f[2]))), ex, ey)
 

@@ -14,7 +14,7 @@ from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions,
 IRIS = ((468, 33, 133), (473, 362, 263))  # face mesh: (iris center, eye corner, eye corner) per eye
 HEAD_X, HEAD_Y = (33, 263), (10, 152)      # head axes: outer eye corner to outer eye corner, forehead to chin
 HEAD_IDS = {i for e in IRIS for i in e} | set(HEAD_X) | set(HEAD_Y)
-FEATURES = 2  # bump when estimate() output changes meaning; calib.json must match
+FEATURES = 3  # bump when estimate() output changes meaning; calib.json must match
 
 
 def _unit(v):
@@ -106,14 +106,16 @@ class HeadPose:
         )
         self._lm = FaceLandmarker.create_from_options(opts)
         self._last_ms = -1
+        self.box = None  # face bounding box (x0, y0, x1, y1) in px from the last estimate(), for tools
 
     def estimate(self, t, frame_bgr):
-        """Returns (yaw, pitch, eye_x, eye_y), or None if no face. yaw/pitch are head angles in
-        degrees; eye_x/eye_y are the iris offsets from the eye-corner midpoint along the head's own
-        left-right / up-down axes, in percent of eye width, averaged over both eyes. Measuring in the
-        head frame (not the image) keeps a head turn from leaking into the eye offset: the iris sits
-        in front of the corners, so in the image it shifts with yaw even when the eyes do not move.
-        Signs are arbitrary; calibration absorbs them."""
+        """Returns (yaw, pitch, eye_x, eye_y, head_x, head_y, head_z), or None if no face. yaw/pitch
+        are head angles in degrees; eye_x/eye_y are the iris offsets from the eye-corner midpoint along
+        the head's own left-right / up-down axes, in percent of eye width, averaged over both eyes.
+        Measuring in the head frame (not the image) keeps a head turn from leaking into the eye offset:
+        the iris sits in front of the corners, so in the image it shifts with yaw even when the eyes do
+        not move. head_x/y/z is the head position in camera space (cm): leaning back or sideways
+        changes the angle needed to look at the same spot. Signs are arbitrary; calibration absorbs them."""
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         ms = max(int(t * 1000), self._last_ms + 1)  # VIDEO mode needs strictly increasing timestamps
@@ -121,10 +123,13 @@ class HeadPose:
         res = self._lm.detect_for_video(image, ms)
         if not res.facial_transformation_matrixes:
             return None
-        f = np.asarray(res.facial_transformation_matrixes[0])[:3, 2]  # face normal in camera space
+        m = np.asarray(res.facial_transformation_matrixes[0])
+        f = m[:3, 2]  # face normal in camera space
         if f[2] < 0:
             f = -f  # keep atan2 away from its +-180 wrap at a frontal pose
         lm, (h, w) = res.face_landmarks[0], frame_bgr.shape[:2]
+        xs, ys = [p.x * w for p in lm], [p.y * h for p in lm]
+        self.box = (min(xs), min(ys), max(xs), max(ys))
         # landmark z shares x's scale (fraction of image width), so x*w, y*h, z*w is one 3D pixel frame
         pt = {i: np.array([lm[i].x * w, lm[i].y * h, lm[i].z * w]) for i in HEAD_IDS}
         ux = _unit(pt[HEAD_X[1]] - pt[HEAD_X[0]])
@@ -137,7 +142,7 @@ class HeadPose:
             ex += 50 * (v @ ux) / width  # 50 = 100% / 2 eyes
             ey += 50 * (v @ uy) / width
         return (math.degrees(math.atan2(f[0], f[2])),
-                math.degrees(math.atan2(f[1], math.hypot(f[0], f[2]))), ex, ey)
+                math.degrees(math.atan2(f[1], math.hypot(f[0], f[2]))), ex, ey, *m[:3, 3])
 
     def close(self):
         self._lm.close()

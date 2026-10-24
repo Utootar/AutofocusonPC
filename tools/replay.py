@@ -32,10 +32,10 @@ def main():
     with open(a.trace, newline="") as f:
         for row in csv.reader(f):
             t, fg_logged = float(row[0]), row[5]
-            pose = row[1:3] + row[7:9]  # yaw, pitch, eye_x, eye_y; rows before eye tracking have no eyes
+            pose = row[1:3] + row[7:]  # yaw, pitch, then eye and head position columns if logged
             if fg is None and fg_logged:
                 fg = int(fg_logged)
-            if len(pose) == 4 and all(pose):
+            if len(pose) == len(cfg["gaze_map"]) - 1 and all(pose):  # rows from other versions skipped
                 s = filt(t, cal.score(map_point(cfg["gaze_map"], [float(v) for v in pose])))
             else:
                 filt.reset()

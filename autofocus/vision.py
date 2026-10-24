@@ -12,6 +12,14 @@ from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions, RunningMode
 
 IRIS = ((468, 33, 133), (473, 362, 263))  # face mesh: (iris center, eye corner, eye corner) per eye
+HEAD_X, HEAD_Y = (33, 263), (10, 152)      # head axes: outer eye corner to outer eye corner, forehead to chin
+HEAD_IDS = {i for e in IRIS for i in e} | set(HEAD_X) | set(HEAD_Y)
+FEATURES = 2  # bump when estimate() output changes meaning; calib.json must match
+
+
+def _unit(v):
+    return v / (np.linalg.norm(v) or 1.0)
+
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/"
              "face_landmarker/float16/1/face_landmarker.task")
 
@@ -101,8 +109,11 @@ class HeadPose:
 
     def estimate(self, t, frame_bgr):
         """Returns (yaw, pitch, eye_x, eye_y), or None if no face. yaw/pitch are head angles in
-        degrees; eye_x/eye_y are the iris offsets from the eye-corner midpoint, in percent of eye
-        width, averaged over both eyes. Signs are arbitrary; calibration absorbs them."""
+        degrees; eye_x/eye_y are the iris offsets from the eye-corner midpoint along the head's own
+        left-right / up-down axes, in percent of eye width, averaged over both eyes. Measuring in the
+        head frame (not the image) keeps a head turn from leaking into the eye offset: the iris sits
+        in front of the corners, so in the image it shifts with yaw even when the eyes do not move.
+        Signs are arbitrary; calibration absorbs them."""
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         ms = max(int(t * 1000), self._last_ms + 1)  # VIDEO mode needs strictly increasing timestamps
@@ -114,12 +125,17 @@ class HeadPose:
         if f[2] < 0:
             f = -f  # keep atan2 away from its +-180 wrap at a frontal pose
         lm, (h, w) = res.face_landmarks[0], frame_bgr.shape[:2]
+        # landmark z shares x's scale (fraction of image width), so x*w, y*h, z*w is one 3D pixel frame
+        pt = {i: np.array([lm[i].x * w, lm[i].y * h, lm[i].z * w]) for i in HEAD_IDS}
+        ux = _unit(pt[HEAD_X[1]] - pt[HEAD_X[0]])
+        uy = pt[HEAD_Y[1]] - pt[HEAD_Y[0]]
+        uy = _unit(uy - (uy @ ux) * ux)
         ex = ey = 0.0
         for c, a, b in IRIS:
-            ax, ay, bx, by = lm[a].x * w, lm[a].y * h, lm[b].x * w, lm[b].y * h
-            width = math.hypot(bx - ax, by - ay) or 1.0
-            ex += 50 * (lm[c].x * w - (ax + bx) / 2) / width  # 50 = 100% / 2 eyes
-            ey += 50 * (lm[c].y * h - (ay + by) / 2) / width
+            v = pt[c] - (pt[a] + pt[b]) / 2
+            width = np.linalg.norm(pt[b] - pt[a]) or 1.0
+            ex += 50 * (v @ ux) / width  # 50 = 100% / 2 eyes
+            ey += 50 * (v @ uy) / width
         return (math.degrees(math.atan2(f[0], f[2])),
                 math.degrees(math.atan2(f[1], math.hypot(f[0], f[2]))), ex, ey)
 

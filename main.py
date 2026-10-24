@@ -93,7 +93,7 @@ def calibrate(cam, pose):
     print(f"both screens: gaze fit error ~{fit_error(gaze, all_poses, all_pts):.0f} px")
     cal = Calib.fit(*[map_point(gaze, c) for c in centers])
     with open(CALIB, "w") as f:
-        json.dump({**cal.to_dict(), "devices": devices, "layout": win.layout(),
+        json.dump({**cal.to_dict(), "devices": devices, "layout": win.layout(), "features": vision.FEATURES,
                    "gaze_map": gaze.tolist(), "point_maps": maps}, f, indent=2)
     with open(LEARNED, "w", newline="") as f:  # a new calibration also forgets old clicks
         csv.writer(f).writerows(rows)
@@ -113,7 +113,7 @@ def run(cam, pose):
         sys.exit("No calib.json. Run: python main.py calibrate")
     with open(CALIB) as f:
         cfg = json.load(f)
-    if "gaze_map" not in cfg or not os.path.exists(LEARNED):
+    if cfg.get("features") != vision.FEATURES or not os.path.exists(LEARNED):
         sys.exit("calib.json is from an older version. Run: python main.py calibrate")
     cal = Calib.from_dict(cfg)  # passive updates stay in memory; calib.json is the stable baseline
     w = win.Win(cfg["devices"])

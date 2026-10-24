@@ -28,8 +28,8 @@ class Camera:
     """Grabs every frame on a background thread (keeps the driver buffer drained, so no stale
     frames), but decodes only when read() asks for one."""
 
-    def __init__(self, index=0):
-        self.index = index
+    def __init__(self, index=0, width=640, height=480):
+        self.index, self.width, self.height = index, width, height
         self._cap = None
         self._thread = None
         self._stop = threading.Event()
@@ -47,8 +47,8 @@ class Camera:
             cap.release()
             return False
         # driver-side downscale is cheaper than decoding 720p; drivers may ignore these
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         cap.set(cv2.CAP_PROP_FPS, 15)
         self._cap = cap
         self._stop.clear()

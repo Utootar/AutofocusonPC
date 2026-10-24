@@ -26,6 +26,7 @@ MODEL = os.path.join(DATA, "face_landmarker.task")
 TRACE_MAX = 10 * 1024 * 1024
 OPEN_RETRY_S = 30   # camera busy (e.g. a video call): back off
 STALL_S = 3         # no frames this long (e.g. after resume): reopen
+CAM_SIZE = (640, 480)  # pick with: python -m tools.camera_bench
 # calibration steps per monitor: (x, y as fractions of the monitor, eyes only). Center first: it fits
 # Calib. Eyes-only steps keep the head on the center, so the fit can tell eye movement from head movement.
 CALIB_STEPS = ((0.5, 0.5, False), (0.1, 0.5, True), (0.9, 0.5, True),
@@ -228,7 +229,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     win.init_process()
     os.makedirs(DATA, exist_ok=True)
-    cam, pose = vision.Camera(), vision.HeadPose(vision.ensure_model(MODEL))
+    cam, pose = vision.Camera(0, *CAM_SIZE), vision.HeadPose(vision.ensure_model(MODEL))
     try:
         calibrate(cam, pose) if sys.argv[1:] == ["calibrate"] else run(cam, pose)
     finally:

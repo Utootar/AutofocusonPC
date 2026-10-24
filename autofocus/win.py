@@ -125,6 +125,7 @@ BELOW_NORMAL_PRIORITY_CLASS = 0x4000
 SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW"}
 BLOCKED_PROCESSES = {"startmenuexperiencehost.exe", "searchhost.exe"}
 QUIET_MS = 800       # a click this recent blocks a switch; mouse input this recent keeps the cursor put
+VOTE_R = 250         # px, about the measured gaze error; spacing of the window-vote grid
 TYPING_HOLD_S = 3.0  # no switch this long after the last keystroke: typing pins focus to its window
 # keys that count as typing: everything except mouse buttons, modifiers and our own Alt/mask injection
 TYPING_VKS = [vk for vk in range(0x08, 0xFF)
@@ -369,10 +370,30 @@ class Win:
     def _rect(self, mon):
         return next((r for d, r in layout() if d == self.devices[mon]), None)
 
-    def _window_at(self, mon, pt):
+    def _root_at(self, pt):
         h = WindowFromPoint(W.POINT(*pt))
-        h = GetAncestor(h, GA_ROOT) if h else None
-        return h if h and self._activatable(h, mon) else None
+        return GetAncestor(h, GA_ROOT) if h else None
+
+    def _window_near(self, mon, pt):
+        """The window the user most likely looks at, and a cursor spot on it. The gaze estimate is
+        ~VOTE_R px off, so a 3x3 grid around it votes (center counts most); WindowFromPoint already
+        accounts for windows covering each other. Returns (hwnd, (x, y)) or (None, None)."""
+        votes = {}
+        for dx in (-VOTE_R, 0, VOTE_R):
+            for dy in (-VOTE_R, 0, VOTE_R):
+                q = (pt[0] + dx, pt[1] + dy)
+                h = self._root_at(q) if self.monitor_at(q) == mon else None
+                if h and self._activatable(h, mon):
+                    votes.setdefault(h, []).append((q, 4 >> (bool(dx) + bool(dy))))  # 4 center, 2 edge, 1 corner
+        if not votes:
+            return None, None
+        h = max(votes, key=lambda k: sum(w for _, w in votes[k]))
+        hits = votes[h]
+        tot = sum(w for _, w in hits)
+        spot = (sum(q[0] * w for q, w in hits) // tot, sum(q[1] * w for q, w in hits) // tot)
+        if self._root_at(spot) != h:  # weighted mean fell on another window: use the hit nearest the gaze
+            spot = min((q for q, _ in hits), key=lambda q: (q[0] - pt[0]) ** 2 + (q[1] - pt[1]) ** 2)
+        return h, spot
 
     def _restore_cursor(self, mon, hwnd, gaze=None):
         pt = cursor_pos()
@@ -392,11 +413,12 @@ class Win:
         SetCursorPos(*pos)
 
     def switch_to(self, mon, gaze=None):
-        """gaze: estimated (x, y) the user looks at; picks the window under it and puts the cursor there."""
+        """gaze: estimated (x, y) the user looks at; picks the window there and puts the cursor on it."""
         rect = self._rect(mon) if gaze is not None else None
         gaze = (int(min(max(gaze[0], rect[0]), rect[2] - 1)),
                 int(min(max(gaze[1], rect[1]), rect[3] - 1))) if rect else None
-        hwnd = (gaze and self._window_at(mon, gaze)) or self.pick_target(mon)
+        hwnd, gaze = self._window_near(mon, gaze) if gaze else (None, None)
+        hwnd = hwnd or self.pick_target(mon)
         if hwnd is None:
             log.info("no activatable window on monitor %d", mon)
             return False

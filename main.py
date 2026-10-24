@@ -1,6 +1,6 @@
 """Head-pose monitor focus switcher.
 
-  python main.py calibrate   look at the mouse pointer at 15 + 12 spots per monitor (2 postures); writes data/calib.json
+  python main.py calibrate   look at the mouse pointer at 15 spots per monitor; writes data/calib.json
   python main.py             run; Ctrl+C to stop
 """
 import collections
@@ -32,9 +32,7 @@ CAM_SIZE = (640, 480)  # pick with: python -m tools.camera_bench
 # Then a 4x3 grid incl. corners: in tools.l2cs_test data it beat edge middles only, 196 vs 240 px.
 CALIB_STEPS = ((0.5, 0.5, False), (0.1, 0.5, True), (0.9, 0.5, True),
                *((fx, fy, False) for fy in (0.15, 0.5, 0.85) for fx in (0.1, 0.37, 0.63, 0.9)))
-# Each posture repeats the grid, so the fit sees how head position changes the angles for the same spot.
-POSTURES = ("upright", "leaning back in your chair (your relaxed position)")
-STEADY_DEG = 4.0   # head counts as settled when yaw and pitch each move less than this over 0.3 s
+STEADY_DEG = 4.0    # head counts as settled when yaw and pitch each move less than this over 0.3 s
 
 log = logging.getLogger("main")
 
@@ -65,40 +63,32 @@ def calibrate(cam, pose):
     input("Move the mouse onto the notebook screen, then press Enter... ")
     first = win.cursor_device()
     devices = [first] + [d for d in lay if d != first]
-    names = ("notebook", "external")
-    per = [([], []) for _ in devices]  # per monitor: poses, pointer positions
-    centers, rows = [], []
-    for k, posture in enumerate(POSTURES):
-        input(f"Sit {posture} and stay like that until asked to change, press Enter... ")
-        # later postures repeat only the grid: the center fits Calib, eyes-only steps need one posture
-        steps = CALIB_STEPS if k == 0 else CALIB_STEPS[3:]
-        for mon, (name, dev) in enumerate(zip(names, devices)):
-            l, t, r, b = lay[dev]
-            poses, pts = per[mon]
-            for i, (fx, fy, eyes_only) in enumerate(steps):
-                x, y = int(l + fx * (r - l)), int(t + fy * (b - t))
-                win.SetCursorPos(x, y)
-                how = (f"keep your HEAD facing the center of the {name} screen, move ONLY your EYES to the mouse "
-                       f"pointer" if eyes_only else "look at the mouse pointer the way you normally would")
-                input(f"[{posture}, {name} {i + 1}/{len(steps)}] {how}, keep looking, press Enter... ")
-                time.sleep(0.3)  # let the head settle after the key press
-                print("Hold still for 1.5 s")
-                s = sample(cam, pose, 1.5)
-                if len(s) < 8:
-                    sys.exit(f"Only {len(s)} face samples. Check lighting and that the camera sees you.")
-                if k == 0 and i == 0:
-                    centers.append(s)
-                poses += s
-                pts += [(x, y)] * len(s)
-                rows += [(time.time(), "cal", mon, x, y, *p) for p in s]
-    cam.close()
-    maps, all_poses, all_pts = [], [], []
-    for name, (poses, pts) in zip(names, per):
+    centers, maps, all_poses, all_pts, rows = [], [], [], [], []
+    for name, dev in zip(("notebook", "external"), devices):
+        l, t, r, b = lay[dev]
+        poses, pts = [], []
+        for i, (fx, fy, eyes_only) in enumerate(CALIB_STEPS):
+            x, y = int(l + fx * (r - l)), int(t + fy * (b - t))
+            win.SetCursorPos(x, y)
+            how = (f"keep your HEAD facing the center of the {name} screen, move ONLY your EYES to the mouse pointer"
+                   if eyes_only else "look at the mouse pointer the way you normally would")
+            input(f"[{name} {i + 1}/{len(CALIB_STEPS)}] {how}, keep looking, press Enter... ")
+            time.sleep(0.3)  # let the head settle after the key press
+            print("Hold still for 1.5 s")
+            s = sample(cam, pose, 1.5)
+            if len(s) < 8:
+                sys.exit(f"Only {len(s)} face samples. Check lighting and that the camera sees you.")
+            if i == 0:
+                centers.append(s)
+            poses += s
+            pts += [(x, y)] * len(s)
+            rows += [(time.time(), "cal", len(maps), x, y, *p) for p in s]
         a = fit_point_map(poses, pts)
         print(f"{name}: gaze fit error ~{fit_error(a, poses, pts):.0f} px")
         maps.append(a.tolist())
         all_poses += poses
         all_pts += pts
+    cam.close()
     # one map over both monitors chooses the monitor, so eyes count: turning only the head does not switch
     gaze = fit_point_map(all_poses, all_pts)
     print(f"both screens: gaze fit error ~{fit_error(gaze, all_poses, all_pts):.0f} px")
@@ -231,7 +221,7 @@ def run(cam, pose):
                 if pts:
                     cal.update(mon, map_point(gmap, np.mean(pts, axis=0)))
 
-            # eye and head position columns go last so replay.py's column indices stay valid
+            # eye columns go last so replay.py's column indices stay valid
             out.writerow([f"{t:.3f}", *([f"{v:.2f}" for v in p[:2]] if p else ["", ""]),
                           f"{s:.3f}" if s is not None else "", sm.zone, fg, event,
                           *([f"{v:.2f}" for v in p[2:]] if p else [])])

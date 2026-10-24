@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.pytest_cache/
+# per-user data: calibration, head-pose trace, auto-downloaded model
+calib.json
+trace.csv*
+face_landmarker.task*

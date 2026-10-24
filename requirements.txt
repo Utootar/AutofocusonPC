@@ -1,0 +1,4 @@
+# mediapipe pulls opencv-contrib-python; adding opencv-python too would clash over cv2
+mediapipe
+numpy
+pytest

@@ -290,27 +290,28 @@ class Win:
 
     # --- guards: polled only when a switch is about to fire ---
 
-    def guards_ok(self):
+    def guard_block(self):
+        """None if a switch may fire now, else a short reason it may not."""
         # Our own SendInput/SetCursorPos also reset the idle clock, but the 1 s refractory
         # outlasts QUIET_MS, so self-injected input never blocks the next switch.
         lii = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
         if GetLastInputInfo(ctypes.byref(lii)) and (GetTickCount() - lii.dwTime) & 0xFFFFFFFF < QUIET_MS:
-            return False
+            return "input"  # mouse moved or a key was pressed in the last QUIET_MS
         if time.monotonic() - self.typed_at < TYPING_HOLD_S:
-            return False
+            return "typing"
         if any(GetAsyncKeyState(vk) & 0x8000 for vk in GUARD_KEYS):
-            return False
+            return "key-held"
         state = ctypes.c_int()
         if SHQueryUserNotificationState(ctypes.byref(state)) == 0 and state.value in QUNS_BLOCK:
-            return False
+            return "fullscreen"
         fg = GetForegroundWindow()
         if fg:
             gti = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
             if GetGUIThreadInfo(GetWindowThreadProcessId(fg, None), ctypes.byref(gti)) and gti.flags & GUI_BLOCK:
-                return False
+                return "menu-or-drag"
             if _process_name(fg) in BLOCKED_PROCESSES:
-                return False
-        return True
+                return "start-or-search"
+        return None
 
     # --- target selection ---
 

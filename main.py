@@ -133,6 +133,7 @@ def run(cam, pose):
     trace = open(TRACE, "a", newline="")
     out = csv.writer(trace)
     enabled, next_check, retry_at, last_frame = False, 0.0, 0.0, time.monotonic()
+    last_wait = ""
     log.info("running; Ctrl+C to stop")
     try:
         while True:
@@ -193,8 +194,19 @@ def run(cam, pose):
                     learn_file.flush()
                     gmap, maps = refit_maps(cal_rows + list(clicks), time.time())
             fg = w.fg_monitor()
-            target = sm.step(t, s, fg, lambda: steady(hist, t) and w.guards_ok())
-            event = ""
+            held = None  # why a due switch is held back, for the console and trace.csv
+
+            def guards():
+                nonlocal held
+                held = "head-moving" if not steady(hist, t) else w.guard_block()
+                return held is None
+
+            target = sm.step(t, s, fg, guards)
+            event = f"wait:{held}" if held else ""
+            if event != last_wait:
+                if held:
+                    log.info("switch held back: %s", held)
+                last_wait = event
             if target is not None:
                 recent = [h[1:] for h in hist if h[0] >= t - 0.3]
                 gaze = map_point(maps[target], np.mean(recent, axis=0)) if recent else None

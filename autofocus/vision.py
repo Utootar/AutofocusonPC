@@ -106,8 +106,6 @@ class HeadPose:
         )
         self._lm = FaceLandmarker.create_from_options(opts)
         self._last_ms = -1
-        self.box = None  # face bounding box (x0, y0, x1, y1) in px from the last estimate(), for tools
-
     def estimate(self, t, frame_bgr):
         """Returns (yaw, pitch, eye_x, eye_y), or None if no face. yaw/pitch are head angles in
         degrees; eye_x/eye_y are the iris offsets from the eye-corner midpoint along the head's own
@@ -125,10 +123,7 @@ class HeadPose:
         f = np.asarray(res.facial_transformation_matrixes[0])[:3, 2]  # face normal in camera space
         if f[2] < 0:
             f = -f  # keep atan2 away from its +-180 wrap at a frontal pose
-        lm, (h, w) = res.face_landmarks[0], frame_bgr.shape[:2]
-        xs, ys = [p.x * w for p in lm], [p.y * h for p in lm]
-        self.box = (min(xs), min(ys), max(xs), max(ys))
-        # landmark z shares x's scale (fraction of image width), so x*w, y*h, z*w is one 3D pixel frame
+        lm, (h, w) = res.face_landmarks[0], frame_bgr.shape[:2]        # landmark z shares x's scale (fraction of image width), so x*w, y*h, z*w is one 3D pixel frame
         pt = {i: np.array([lm[i].x * w, lm[i].y * h, lm[i].z * w]) for i in HEAD_IDS}
         ux = _unit(pt[HEAD_X[1]] - pt[HEAD_X[0]])
         uy = pt[HEAD_Y[1]] - pt[HEAD_Y[0]]

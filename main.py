@@ -29,7 +29,7 @@ STALL_S = 3         # no frames this long (e.g. after resume): reopen
 CAM_SIZE = (640, 480)  # pick with: python -m tools.camera_bench
 # calibration steps per monitor: (x, y as fractions of the monitor, eyes only). Center first: it fits
 # Calib. Eyes-only steps keep the head on the center, so the fit can tell eye movement from head movement.
-# Then a 4x3 grid incl. corners: in tools.l2cs_test data it beat edge middles only, 196 vs 240 px.
+# Then a 4x3 grid incl. corners: on recorded grid data it beat edge middles only, 196 vs 240 px.
 CALIB_STEPS = ((0.5, 0.5, False), (0.1, 0.5, True), (0.9, 0.5, True),
                *((fx, fy, False) for fy in (0.15, 0.5, 0.85) for fx in (0.1, 0.37, 0.63, 0.9)))
 STEADY_DEG = 4.0    # head counts as settled when yaw and pitch each move less than this over 0.3 s
